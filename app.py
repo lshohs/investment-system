@@ -366,6 +366,7 @@ def calc_stock_metrics(row: pd.Series) -> dict | None:
         return None
 
     return {
+
         "code": code,
         "theme": theme,
         "close": close,
@@ -378,31 +379,46 @@ def calc_stock_metrics(row: pd.Series) -> dict | None:
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
-def build_stock_candidates() -> pd.DataFrame:
+def build_stock_candidates() -> tuple[pd.DataFrame, dict]:
     kospi = fetch_market_sum(0, pages=4)
     kosdaq = fetch_market_sum(1, pages=4)
     universe = pd.concat([kospi, kosdaq], ignore_index=True)
     universe = universe.dropna(subset=["name", "close", "value", "mcap"]).copy()
 
+    debug = {
+        "universe": int(len(universe)),
+        "theme_matched": 0,
+        "liq_pass": 0,
+        "metric_pass": 0,
+        "ma20_pass": 0,
+        "final_pass": 0,
+    }
+
     results = []
     progress_placeholder = st.empty()
     names = universe["name"].tolist()
-    for idx, name in enumerate(names[:120]):  # 1차 버전: 상위 유동성 종목 중심
+    for idx, name in enumerate(names[:120]):
         progress_placeholder.caption(f"국내주식 수집 중 {idx+1}/120")
         row = universe.loc[universe["name"] == name].iloc[0]
         theme = infer_theme_stock(name)
         if not theme:
             continue
-        if (row["value"] or 0) < 100 or (row["mcap"] or 0) < 1500:
+        debug["theme_matched"] += 1
+
+        if (row["value"] or 0) < 50 or (row["mcap"] or 0) < 1000:
             continue
+        debug["liq_pass"] += 1
+
         metrics = calc_stock_metrics(row)
         if not metrics:
             continue
+        debug["metric_pass"] += 1
+
         if metrics["close"] <= metrics["ma20"]:
             continue
-        if metrics["ret_5d"] >= 30:
-            continue
-        if metrics["news_count"] < 0:
+        debug["ma20_pass"] += 1
+
+        if metrics["ret_5d"] >= 35:
             continue
 
         score = 0
@@ -411,7 +427,7 @@ def build_stock_candidates() -> pd.DataFrame:
         if row["value"] >= 800:
             score += 20
             reasons.append("거래대금 강함")
-        elif row["value"] >= 500:
+        elif row["value"] >= 300:
             score += 14
             reasons.append("거래대금 양호")
         else:
@@ -430,7 +446,7 @@ def build_stock_candidates() -> pd.DataFrame:
         if metrics["news_count"] >= 5:
             score += 10
             reasons.append("뉴스 강도")
-        elif metrics["news_count"] >= 2:
+        elif metrics["news_count"] >= 1:
             score += 6
             reasons.append("뉴스 유지")
 
@@ -438,7 +454,6 @@ def build_stock_candidates() -> pd.DataFrame:
             score += 10
             reasons.append("상대강도")
 
-        # 테마 대표 종목 가점
         if name in STOCK_THEME_MAP:
             score += 10
             reasons.append("핵심 테마주")
@@ -456,14 +471,15 @@ def build_stock_candidates() -> pd.DataFrame:
                 "news_count": metrics["news_count"],
                 "ret_5d": metrics["ret_5d"],
                 "risk": risk,
-                "reasons": reasons[:4],
+                "reasons": reasons[:4] if reasons else ["기본 통과"],
             }
         )
     progress_placeholder.empty()
     if not results:
-        return pd.DataFrame()
+        return pd.DataFrame(), debug
     df = pd.DataFrame(results).sort_values(["score", "value"], ascending=[False, False]).reset_index(drop=True)
-    return df
+    debug["final_pass"] = int(len(df))
+    return df, debug
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
@@ -590,7 +606,7 @@ elif page == "자동 발굴":
 
     if run:
         with st.spinner("국내주식 자동 발굴 중"):
-            stock_df = build_stock_candidates()
+            stock_df, stock_debug = build_stock_candidates()
         with st.spinner("ETF 자동 발굴 중"):
             etf_df = build_etf_candidates()
 
@@ -603,10 +619,15 @@ elif page == "자동 발굴":
 
         st.session_state.results_stock = stock_df
         st.session_state.results_etf = etf_df
+        st.session_state.stock_debug = stock_debug
         st.session_state.last_run_msg = datetime.now().strftime("%Y-%m-%d %H:%M 실행 완료")
 
     if st.session_state.last_run_msg:
         st.caption(st.session_state.last_run_msg)
+    if "stock_debug" in st.session_state:
+        d = st.session_state.stock_debug
+        with st.expander("진단"):
+            st.write(d)
 
     if run:
         st.markdown("### 진단")
