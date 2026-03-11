@@ -393,16 +393,16 @@ def build_stock_candidates() -> pd.DataFrame:
         theme = infer_theme_stock(name)
         if not theme:
             continue
-        if (row["value"] or 0) < 300 or (row["mcap"] or 0) < 2000:
+        if (row["value"] or 0) < 100 or (row["mcap"] or 0) < 1500:
             continue
         metrics = calc_stock_metrics(row)
         if not metrics:
             continue
         if metrics["close"] <= metrics["ma20"]:
             continue
-        if metrics["ret_5d"] >= 25:
+        if metrics["ret_5d"] >= 30:
             continue
-        if metrics["news_count"] < 1:
+        if metrics["news_count"] < 0:
             continue
 
         score = 0
@@ -595,9 +595,11 @@ elif page == "자동 발굴":
             etf_df = build_etf_candidates()
 
         if not stock_df.empty:
-            stock_df = stock_df[stock_df["theme"].isin(themes)].head(5).copy()
+            stock_df = stock_df[stock_df["theme"].isin(themes)].copy()
+            stock_df = stock_df.sort_values(["score", "value"], ascending=[False, False]).head(5)
         if not etf_df.empty:
-            etf_df = etf_df[etf_df["theme"].isin(themes)].head(5).copy()
+            etf_df = etf_df[etf_df["theme"].isin(themes)].copy()
+            etf_df = etf_df.sort_values(["score", "value"], ascending=[False, False]).head(5)
 
         st.session_state.results_stock = stock_df
         st.session_state.results_etf = etf_df
@@ -605,6 +607,14 @@ elif page == "자동 발굴":
 
     if st.session_state.last_run_msg:
         st.caption(st.session_state.last_run_msg)
+
+    if run:
+        st.markdown("### 진단")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write(f"국내주식 후보 수: {0 if st.session_state.results_stock.empty else len(st.session_state.results_stock)}")
+        with c2:
+            st.write(f"ETF 후보 수: {0 if st.session_state.results_etf.empty else len(st.session_state.results_etf)}")
 
     st.markdown("### 국내주식 TOP 5")
     if st.session_state.results_stock.empty:
