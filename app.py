@@ -244,8 +244,7 @@ def render_guide(title: str) -> None:
     guide = GUIDES[title]
     st.subheader(title)
     st.caption(f"{guide['category']} · {guide['summary']}")
-    st.write(f"**목적**  
-{guide['purpose']}")
+    st.write(f"**목적**  \n{guide['purpose']}")
 
     st.write("**핵심 규칙**")
     for item in guide["points"]:
