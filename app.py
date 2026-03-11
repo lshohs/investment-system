@@ -204,18 +204,36 @@ def fetch_market_sum(sosok: int = 0, pages: int = 4) -> pd.DataFrame:
             continue
         if not tables:
             continue
-        df = tables[1].copy() if len(tables) > 1 else tables[0].copy()
-        df = df.dropna(how="all")
-        if "종목명" not in df.columns:
+        target = None
+        for t in tables:
+            if "종목명" in t.columns:
+                target = t.copy()
+                break
+        if target is None:
             continue
-        df = df[df["종목명"].notna()].copy()
-        rows.append(df)
+        target = target.dropna(how="all")
+        target = target[target["종목명"].notna()].copy()
+        rows.append(target)
         time.sleep(0.15)
     if not rows:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["name", "close", "chg_pct", "volume", "value", "mcap"])
+
     out = pd.concat(rows, ignore_index=True)
-    out = out[[c for c in out.columns if c in ["종목명", "현재가", "등락률", "거래량", "거래대금", "시가총액", "토론실"]]].copy()
-    out = out.rename(columns={"종목명": "name", "현재가": "close", "등락률": "chg_pct", "거래량": "volume", "거래대금": "value", "시가총액": "mcap"})
+    rename_map = {
+        "종목명": "name",
+        "현재가": "close",
+        "등락률": "chg_pct",
+        "거래량": "volume",
+        "거래대금": "value",
+        "시가총액": "mcap",
+    }
+    existing = {k: v for k, v in rename_map.items() if k in out.columns}
+    out = out[list(existing.keys())].rename(columns=existing).copy()
+
+    for col in ["name", "close", "chg_pct", "volume", "value", "mcap"]:
+        if col not in out.columns:
+            out[col] = None
+
     out["name"] = out["name"].map(clean_name)
     out["close"] = out["close"].map(parse_number)
     out["chg_pct"] = out["chg_pct"].map(parse_number)
@@ -223,7 +241,7 @@ def fetch_market_sum(sosok: int = 0, pages: int = 4) -> pd.DataFrame:
     out["value"] = out["value"].map(parse_number)
     out["mcap"] = out["mcap"].map(parse_number)
     out = out.drop_duplicates(subset=["name"])
-    return out
+    return out[["name", "close", "chg_pct", "volume", "value", "mcap"]]
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
