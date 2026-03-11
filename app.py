@@ -1,32 +1,20 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-from functools import lru_cache
-import re
-import time
+from pykrx import stock
 
 st.set_page_config(page_title="Stock Radar", page_icon="📈", layout="wide")
 
-# =========================
-# Style
-# =========================
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 1.6rem; padding-bottom: 2rem; max-width: 1220px;}
+    .block-container {padding-top: 1.6rem; padding-bottom: 2rem; max-width: 1200px;}
     .stButton>button {border-radius: 14px; height: 46px; font-weight: 700;}
-    .stSelectbox div[data-baseweb="select"] > div,
-    .stMultiSelect div[data-baseweb="select"] > div,
-    .stTextInput input {
-        border-radius: 14px !important;
-    }
     .hero {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         color: white;
         border-radius: 24px;
-        padding: 26px 28px;
+        padding: 24px 28px;
         margin-bottom: 18px;
     }
     .card {
@@ -36,13 +24,6 @@ st.markdown(
         padding: 16px 18px;
         margin-bottom: 14px;
     }
-    .metric-card {
-        background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e5e7eb;
-        border-radius: 18px;
-        padding: 16px;
-    }
-    .muted {color:#6b7280; font-size:0.92rem;}
     .pill {
         display:inline-block;
         padding: 6px 10px;
@@ -53,491 +34,265 @@ st.markdown(
         margin-right: 6px;
         margin-top: 6px;
     }
+    .muted {color:#6b7280; font-size:0.92rem;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# =========================
-# Constants
-# =========================
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-    "Referer": "https://finance.naver.com/",
-}
-REQUEST_TIMEOUT = 15
-MARKETS = ["국내주식", "국내상장 ETF"]
-TERMS = ["스윙", "중기"]
-MARKET_MODES = ["정상", "중립", "방어"]
-MODE_RULES = {
-    "정상": "최대 3종목",
-    "중립": "최대 2종목",
-    "방어": "최대 1종목 · 현금 비중 확대",
-}
-
-THEME_KEYWORDS = {
-    "반도체": ["반도체", "HBM", "메모리", "파운드리", "장비", "테스트", "후공정"],
-    "AI": ["AI", "인공지능", "서버", "데이터센터", "클라우드", "GPU", "NPU"],
-    "방산": ["방산", "미사일", "군수", "방위", "레이더", "우주항공"],
-    "원전": ["원전", "원자력", "SMR", "핵연료", "원자로"],
-    "조선": ["조선", "해양", "선박", "LNG선", "조선기자재"],
-    "2차전지": ["2차전지", "배터리", "양극재", "음극재", "전해질", "리튬"],
-    "로봇": ["로봇", "협동로봇", "자동화", "모빌리티로봇"],
-    "전력기기": ["전력", "변압기", "배전", "전선", "전력기기", "초고압", "전력설비"],
-}
-
-STOCK_THEME_MAP = {
-    "한미반도체": "반도체",
-    "이수페타시스": "AI",
-    "리노공업": "반도체",
-    "테크윙": "반도체",
-    "피에스케이홀딩스": "반도체",
-    "LIG넥스원": "방산",
-    "한화에어로스페이스": "방산",
-    "현대로템": "방산",
-    "두산에너빌리티": "원전",
-    "비에이치아이": "원전",
-    "한전기술": "원전",
-    "HD현대일렉트릭": "전력기기",
-    "LS ELECTRIC": "전력기기",
-    "효성중공업": "전력기기",
-    "HD한국조선해양": "조선",
-    "한화오션": "조선",
-    "삼성중공업": "조선",
-    "에코프로비엠": "2차전지",
-    "포스코퓨처엠": "2차전지",
-    "에코프로": "2차전지",
-    "레인보우로보틱스": "로봇",
-    "두산로보틱스": "로봇",
-    "로보스타": "로봇",
-    "삼성전자": "반도체",
-    "SK하이닉스": "반도체",
+THEMES = {
+    "반도체": ["삼성전자", "SK하이닉스", "한미반도체", "리노공업", "테크윙", "이수페타시스", "피에스케이홀딩스"],
+    "AI": ["이수페타시스", "NAVER", "카카오", "삼성에스디에스", "폴라리스오피스"],
+    "방산": ["한화에어로스페이스", "LIG넥스원", "현대로템", "한국항공우주"],
+    "원전": ["두산에너빌리티", "한전기술", "비에이치아이", "우리기술"],
+    "조선": ["HD한국조선해양", "한화오션", "삼성중공업", "HD현대중공업"],
+    "2차전지": ["에코프로비엠", "에코프로", "포스코퓨처엠", "엘앤에프"],
+    "로봇": ["레인보우로보틱스", "두산로보틱스", "로보스타", "유일로보틱스"],
+    "전력기기": ["HD현대일렉트릭", "LS ELECTRIC", "효성중공업", "제룡전기"],
 }
 
 ETF_THEME_RULES = {
-    "반도체": ["반도체", "SOXX", "필라델피아"],
+    "반도체": ["반도체", "필라델피아"],
     "AI": ["AI", "인공지능", "빅테크", "테크"],
     "방산": ["방산", "디펜스"],
     "원전": ["원전", "원자력", "SMR"],
     "조선": ["조선", "해운"],
     "2차전지": ["2차전지", "배터리", "전기차"],
     "로봇": ["로봇", "자동화"],
-    "전력기기": ["전력", "전선", "전력설비", "인프라"],
+    "전력기기": ["전력", "인프라", "전선", "전력설비"],
 }
 
-if "results_stock" not in st.session_state:
-    st.session_state.results_stock = pd.DataFrame()
-if "results_etf" not in st.session_state:
-    st.session_state.results_etf = pd.DataFrame()
-if "last_run_msg" not in st.session_state:
-    st.session_state.last_run_msg = ""
+MODE_RULES = {
+    "정상": "최대 3종목",
+    "중립": "최대 2종목",
+    "방어": "최대 1종목 · 현금 비중 확대",
+}
 
-# =========================
-# Helpers
-# =========================
-def parse_number(value):
-    if pd.isna(value):
-        return None
-    text = str(value).strip()
-    text = text.replace(",", "")
-    text = text.replace("%", "")
-    text = text.replace("N/A", "")
-    if text in ["", "-"]:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
+if "stock_results" not in st.session_state:
+    st.session_state.stock_results = pd.DataFrame()
+if "etf_results" not in st.session_state:
+    st.session_state.etf_results = pd.DataFrame()
 
 
-def clean_name(name: str) -> str:
-    return re.sub(r"\s+", " ", str(name)).strip()
+def prev_business_day() -> str:
+    d = datetime.now()
+    if d.hour < 8:
+        d = d - timedelta(days=1)
+    while d.weekday() >= 5:
+        d = d - timedelta(days=1)
+    return d.strftime("%Y%m%d")
 
 
-def infer_theme_stock(name: str) -> str | None:
-    if name in STOCK_THEME_MAP:
-        return STOCK_THEME_MAP[name]
-    for theme, keywords in THEME_KEYWORDS.items():
-        if any(k.lower() in name.lower() for k in keywords):
+def start_lookback(days: int = 40) -> str:
+    d = datetime.now() - timedelta(days=days)
+    return d.strftime("%Y%m%d")
+
+
+def infer_stock_theme(name: str):
+    for theme, names in THEMES.items():
+        if name in names:
             return theme
     return None
 
 
-def infer_theme_etf(name: str) -> str | None:
+def infer_etf_theme(name: str):
     for theme, keywords in ETF_THEME_RULES.items():
         if any(k.lower() in name.lower() for k in keywords):
             return theme
     return None
 
 
-def result_card(item: dict):
-    reasons = "".join([f"<span class='pill'>{r}</span>" for r in item["reasons"]])
+def result_card(rank: int, name: str, theme: str, score: int, reasons: list[str], risk: str):
+    pills = "".join([f"<span class='pill'>{r}</span>" for r in reasons])
     st.markdown(
         f"""
         <div class='card'>
             <div style='display:flex;justify-content:space-between;align-items:flex-start;gap:12px;'>
                 <div>
-                    <div class='muted'>#{item['rank']} · {item['theme']}</div>
-                    <div style='font-size:1.14rem;font-weight:700;margin-top:2px'>{item['name']}</div>
+                    <div class='muted'>#{rank} · {theme}</div>
+                    <div style='font-size:1.16rem;font-weight:800;margin-top:2px'>{name}</div>
                 </div>
-                <div style='font-size:1.15rem;font-weight:800'>{item['score']}</div>
+                <div style='font-size:1.12rem;font-weight:800'>{score}</div>
             </div>
-            <div style='margin-top:10px'>{reasons}</div>
-            <div class='muted' style='margin-top:12px'>주의 · {item['risk']}</div>
+            <div style='margin-top:10px'>{pills}</div>
+            <div class='muted' style='margin-top:10px'>주의 · {risk}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-# =========================
-# Naver collectors
-# =========================
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
-def fetch_market_sum(sosok: int = 0, pages: int = 4) -> pd.DataFrame:
-    rows = []
-    for page in range(1, pages + 1):
-        url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
-        try:
-            tables = pd.read_html(url, encoding="euc-kr")
-        except Exception:
-            continue
-        if not tables:
-            continue
-        target = None
-        for t in tables:
-            if "종목명" in t.columns:
-                target = t.copy()
-                break
-        if target is None:
-            continue
-        target = target.dropna(how="all")
-        target = target[target["종목명"].notna()].copy()
-        rows.append(target)
-        time.sleep(0.15)
-    if not rows:
-        return pd.DataFrame(columns=["name", "close", "chg_pct", "volume", "value", "mcap"])
+def get_stock_universe(base_date: str) -> pd.DataFrame:
+    kospi_ohlcv = stock.get_market_ohlcv_by_ticker(base_date, market="KOSPI")
+    kosdaq_ohlcv = stock.get_market_ohlcv_by_ticker(base_date, market="KOSDAQ")
+    kospi_cap = stock.get_market_cap_by_ticker(base_date, market="KOSPI")
+    kosdaq_cap = stock.get_market_cap_by_ticker(base_date, market="KOSDAQ")
 
-    out = pd.concat(rows, ignore_index=True)
-    rename_map = {
-        "종목명": "name",
-        "현재가": "close",
-        "등락률": "chg_pct",
-        "거래량": "volume",
-        "거래대금": "value",
-        "시가총액": "mcap",
-    }
-    existing = {k: v for k, v in rename_map.items() if k in out.columns}
-    out = out[list(existing.keys())].rename(columns=existing).copy()
-
-    for col in ["name", "close", "chg_pct", "volume", "value", "mcap"]:
-        if col not in out.columns:
-            out[col] = None
-
-    out["name"] = out["name"].map(clean_name)
-    out["close"] = out["close"].map(parse_number)
-    out["chg_pct"] = out["chg_pct"].map(parse_number)
-    out["volume"] = out["volume"].map(parse_number)
-    out["value"] = out["value"].map(parse_number)
-    out["mcap"] = out["mcap"].map(parse_number)
-    out = out.drop_duplicates(subset=["name"])
-    return out[["name", "close", "chg_pct", "volume", "value", "mcap"]]
+    kospi = kospi_ohlcv.join(kospi_cap[["시가총액"]], how="left")
+    kosdaq = kosdaq_ohlcv.join(kosdaq_cap[["시가총액"]], how="left")
+    df = pd.concat([kospi, kosdaq], axis=0).reset_index().rename(columns={"티커": "ticker"})
+    df["name"] = df["ticker"].apply(stock.get_market_ticker_name)
+    df["theme"] = df["name"].apply(infer_stock_theme)
+    df = df[df["theme"].notna()].copy()
+    return df
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
-def fetch_etf_list() -> pd.DataFrame:
-    url = "https://finance.naver.com/sise/etf.naver"
-    try:
-        tables = pd.read_html(url, encoding="euc-kr")
-    except Exception:
-        return pd.DataFrame()
-    target = None
-    for t in tables:
-        if "종목명" in t.columns:
-            target = t.copy()
-            break
-    if target is None:
-        return pd.DataFrame()
-    target = target.dropna(how="all")
-    target = target[target["종목명"].notna()].copy()
-    cols = [c for c in target.columns if c in ["종목명", "현재가", "등락률", "거래량", "거래대금", "NAV", "3개월수익률", "1개월수익률"]]
-    target = target[cols].copy()
-    target = target.rename(columns={"종목명": "name", "현재가": "close", "등락률": "chg_pct", "거래량": "volume", "거래대금": "value", "3개월수익률": "ret_3m", "1개월수익률": "ret_1m"})
-    for col in ["close", "chg_pct", "volume", "value", "ret_3m", "ret_1m"]:
-        if col in target.columns:
-            target[col] = target[col].map(parse_number)
-    target["name"] = target["name"].map(clean_name)
-    target = target.drop_duplicates(subset=["name"])
-    return target
-
-
-@lru_cache(maxsize=512)
-def resolve_stock_code(name: str) -> str | None:
-    for sosok in [0, 1]:
-        url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}"
-        try:
-            resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-            resp.encoding = "euc-kr"
-        except Exception:
-            continue
-        soup = BeautifulSoup(resp.text, "lxml")
-        links = soup.select("a.tltle")
-        for a in links:
-            if clean_name(a.get_text()) == name:
-                href = a.get("href", "")
-                m = re.search(r"code=(\d+)", href)
-                if m:
-                    return m.group(1)
-    return None
+def get_etf_universe(base_date: str) -> pd.DataFrame:
+    df = stock.get_etf_ohlcv_by_ticker(base_date).reset_index().rename(columns={"티커": "ticker"})
+    df["name"] = df["ticker"].apply(stock.get_etf_ticker_name)
+    df["theme"] = df["name"].apply(infer_etf_theme)
+    df = df[df["theme"].notna()].copy()
+    return df
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
-def fetch_daily_prices(code: str, pages: int = 5) -> pd.DataFrame:
-    frames = []
-    for page in range(1, pages + 1):
-        url = f"https://finance.naver.com/item/sise_day.naver?code={code}&page={page}"
-        try:
-            tables = pd.read_html(url, encoding="euc-kr")
-        except Exception:
-            continue
-        if not tables:
-            continue
-        df = tables[0].copy().dropna()
-        if "날짜" not in df.columns:
-            continue
-        df["날짜"] = pd.to_datetime(df["날짜"])
-        for col in ["종가", "시가", "고가", "저가", "거래량"]:
-            df[col] = df[col].map(parse_number)
-        frames.append(df)
-        time.sleep(0.1)
-    if not frames:
-        return pd.DataFrame()
-    out = pd.concat(frames, ignore_index=True).drop_duplicates(subset=["날짜"]).sort_values("날짜")
-    return out
-
-
-@st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
-def fetch_recent_news_count(code: str, pages: int = 2, recent_days: int = 3) -> int:
-    count = 0
-    threshold = datetime.now() - timedelta(days=recent_days)
-    for page in range(1, pages + 1):
-        url = f"https://finance.naver.com/item/news_news.naver?code={code}&page={page}"
-        try:
-            resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-            resp.encoding = "euc-kr"
-        except Exception:
-            continue
-        soup = BeautifulSoup(resp.text, "lxml")
-        dates = soup.select("table.type5 td.date")
-        for d in dates:
-            text = d.get_text(strip=True)
-            try:
-                dt = datetime.strptime(text, "%Y.%m.%d %H:%M")
-            except Exception:
-                continue
-            if dt >= threshold:
-                count += 1
-        time.sleep(0.1)
-    return count
-
-
-# =========================
-# Scoring engine
-# =========================
-def calc_stock_metrics(row: pd.Series) -> dict | None:
-    code = resolve_stock_code(row["name"])
-    if not code:
-        return None
-    price_df = fetch_daily_prices(code, pages=6)
-    if price_df.empty or len(price_df) < 25:
-        return None
-
-    price_df = price_df.sort_values("날짜")
-    close = price_df["종가"].iloc[-1]
-    ma20 = price_df["종가"].rolling(20).mean().iloc[-1]
-    ma20_prev = price_df["종가"].rolling(20).mean().iloc[-2]
-    ret_5d = ((close / price_df["종가"].iloc[-6]) - 1) * 100 if len(price_df) >= 6 else 0
-    high_10 = price_df["고가"].tail(10).max()
-    near_breakout = close >= high_10 * 0.98
-    news_count = fetch_recent_news_count(code, pages=2, recent_days=3)
-
-    theme = infer_theme_stock(row["name"])
-    if not theme:
-        return None
-
-    return {
-
-        "code": code,
-        "theme": theme,
-        "close": close,
-        "ma20": ma20,
-        "ma20_up": ma20 > ma20_prev,
-        "ret_5d": ret_5d,
-        "near_breakout": near_breakout,
-        "news_count": news_count,
-    }
+def get_price_history(ticker: str, is_etf: bool = False) -> pd.DataFrame:
+    s = start_lookback(70)
+    e = prev_business_day()
+    if is_etf:
+        df = stock.get_etf_ohlcv_by_date(s, e, ticker)
+    else:
+        df = stock.get_market_ohlcv_by_date(s, e, ticker)
+    return df
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
 def build_stock_candidates() -> tuple[pd.DataFrame, dict]:
-    kospi = fetch_market_sum(0, pages=4)
-    kosdaq = fetch_market_sum(1, pages=4)
-    universe = pd.concat([kospi, kosdaq], ignore_index=True)
-    universe = universe.dropna(subset=["name", "close", "value", "mcap"]).copy()
+    base_date = prev_business_day()
+    uni = get_stock_universe(base_date)
+    debug = {"universe": int(len(uni)), "liq_pass": 0, "price_pass": 0, "final_pass": 0}
+    rows = []
 
-    debug = {
-        "universe": int(len(universe)),
-        "theme_matched": 0,
-        "liq_pass": 0,
-        "metric_pass": 0,
-        "ma20_pass": 0,
-        "final_pass": 0,
-    }
-
-    results = []
-    progress_placeholder = st.empty()
-    names = universe["name"].tolist()
-    for idx, name in enumerate(names[:120]):
-        progress_placeholder.caption(f"국내주식 수집 중 {idx+1}/120")
-        row = universe.loc[universe["name"] == name].iloc[0]
-        theme = infer_theme_stock(name)
-        if not theme:
-            continue
-        debug["theme_matched"] += 1
-
-        if (row["value"] or 0) < 50 or (row["mcap"] or 0) < 1000:
+    for _, row in uni.iterrows():
+        value = float(row.get("거래대금", 0) or 0)
+        mcap = float(row.get("시가총액", 0) or 0)
+        if value < 100_000_000_000 or mcap < 1_500_000_000_000:
             continue
         debug["liq_pass"] += 1
 
-        metrics = calc_stock_metrics(row)
-        if not metrics:
+        hist = get_price_history(row["ticker"], is_etf=False)
+        if hist.empty or len(hist) < 25:
             continue
-        debug["metric_pass"] += 1
+        close = hist["종가"].iloc[-1]
+        ma20 = hist["종가"].rolling(20).mean().iloc[-1]
+        ma20_prev = hist["종가"].rolling(20).mean().iloc[-2]
+        if pd.isna(ma20) or close <= ma20:
+            continue
+        debug["price_pass"] += 1
 
-        if metrics["close"] <= metrics["ma20"]:
+        ret_5d = ((close / hist["종가"].iloc[-6]) - 1) * 100 if len(hist) >= 6 else 0
+        if ret_5d >= 30:
             continue
-        debug["ma20_pass"] += 1
 
-        if metrics["ret_5d"] >= 35:
-            continue
+        recent_high_10 = hist["고가"].tail(10).max()
+        near_breakout = close >= recent_high_10 * 0.98
 
         score = 0
         reasons = []
 
-        if row["value"] >= 800:
+        if value >= 300_000_000_000:
             score += 20
             reasons.append("거래대금 강함")
-        elif row["value"] >= 300:
-            score += 14
+        else:
+            score += 12
             reasons.append("거래대금 양호")
+
+        if close > ma20 and ma20 > ma20_prev:
+            score += 15
+            reasons.append("20일선 우위")
         else:
             score += 8
 
-        if metrics["close"] > metrics["ma20"] and metrics["ma20_up"]:
-            score += 15
-            reasons.append("20일선 우위")
-        elif metrics["close"] > metrics["ma20"]:
-            score += 10
-
-        if metrics["near_breakout"]:
+        if near_breakout:
             score += 15
             reasons.append("고점 근접")
 
-        if metrics["news_count"] >= 5:
-            score += 10
-            reasons.append("뉴스 강도")
-        elif metrics["news_count"] >= 1:
-            score += 6
-            reasons.append("뉴스 유지")
-
-        if abs(row.get("chg_pct", 0) or 0) >= 3:
+        chg_pct = float(row.get("등락률", 0) or 0)
+        if abs(chg_pct) >= 3:
             score += 10
             reasons.append("상대강도")
 
-        if name in STOCK_THEME_MAP:
-            score += 10
-            reasons.append("핵심 테마주")
+        score += 10
+        reasons.append("핵심 테마")
 
-        risk = "단기 과열 확인" if metrics["ret_5d"] >= 15 else "20일선 유지 확인"
-
-        results.append(
+        risk = "단기 과열 확인" if ret_5d >= 15 else "20일선 유지 확인"
+        rows.append(
             {
-                "name": name,
-                "theme": metrics["theme"],
+                "name": row["name"],
+                "theme": row["theme"],
                 "score": int(score),
-                "value": row["value"],
-                "mcap": row["mcap"],
-                "chg_pct": row.get("chg_pct", 0),
-                "news_count": metrics["news_count"],
-                "ret_5d": metrics["ret_5d"],
+                "reasons": reasons[:4],
                 "risk": risk,
-                "reasons": reasons[:4] if reasons else ["기본 통과"],
+                "value": value,
             }
         )
-    progress_placeholder.empty()
-    if not results:
-        return pd.DataFrame(), debug
-    df = pd.DataFrame(results).sort_values(["score", "value"], ascending=[False, False]).reset_index(drop=True)
+
+    df = pd.DataFrame(rows).sort_values(["score", "value"], ascending=[False, False]).reset_index(drop=True) if rows else pd.DataFrame()
     debug["final_pass"] = int(len(df))
     return df, debug
 
 
 @st.cache_data(ttl=60 * 60 * 4, show_spinner=False)
 def build_etf_candidates() -> pd.DataFrame:
-    df = fetch_etf_list()
-    if df.empty:
-        return pd.DataFrame()
-    df["theme"] = df["name"].apply(infer_theme_etf)
-    df = df[df["theme"].notna()].copy()
-    df = df[df["value"].fillna(0) >= 100].copy()
-
+    base_date = prev_business_day()
+    uni = get_etf_universe(base_date)
     rows = []
-    for _, row in df.iterrows():
+
+    for _, row in uni.iterrows():
+        value = float(row.get("거래대금", 0) or 0)
+        if value < 30_000_000_000:
+            continue
+
+        hist = get_price_history(row["ticker"], is_etf=True)
+        if hist.empty or len(hist) < 25:
+            continue
+        close = hist["종가"].iloc[-1]
+        ma20 = hist["종가"].rolling(20).mean().iloc[-1]
+        if pd.isna(ma20) or close <= ma20:
+            continue
+
+        ret_5d = ((close / hist["종가"].iloc[-6]) - 1) * 100 if len(hist) >= 6 else 0
+        if ret_5d >= 25:
+            continue
+
         score = 0
         reasons = []
 
-        if row["value"] >= 300:
+        if value >= 100_000_000_000:
             score += 20
             reasons.append("거래대금 강함")
-        elif row["value"] >= 150:
-            score += 14
-            reasons.append("거래대금 양호")
         else:
-            score += 8
+            score += 12
+            reasons.append("거래대금 양호")
 
-        ret_1m = row.get("ret_1m", 0) or 0
-        ret_3m = row.get("ret_3m", 0) or 0
-        if ret_1m > 0:
-            score += 20
-            reasons.append("1개월 수익률")
-        if ret_3m > 0:
+        score += 20
+        reasons.append("20일선 우위")
+
+        if ret_5d > 0:
             score += 15
-            reasons.append("3개월 수익률")
-        if abs(row.get("chg_pct", 0) or 0) >= 1.5:
-            score += 15
-            reasons.append("상대강도")
+            reasons.append("5일 수익률")
+
         if row["theme"] in ["반도체", "AI", "전력기기", "방산", "원전"]:
             score += 15
             reasons.append("핵심 테마")
 
-        risk = "섹터 변동성 확인" if row["chg_pct"] and abs(row["chg_pct"]) > 3 else "추세 유지 확인"
+        risk = "섹터 변동성 확인" if ret_5d >= 10 else "추세 유지 확인"
         rows.append(
             {
                 "name": row["name"],
                 "theme": row["theme"],
                 "score": int(score),
-                "value": row["value"],
-                "chg_pct": row.get("chg_pct", 0),
-                "risk": risk,
                 "reasons": reasons[:4],
+                "risk": risk,
+                "value": value,
             }
         )
-    return pd.DataFrame(rows).sort_values(["score", "value"], ascending=[False, False]).reset_index(drop=True)
+
+    return pd.DataFrame(rows).sort_values(["score", "value"], ascending=[False, False]).reset_index(drop=True) if rows else pd.DataFrame()
 
 
-# =========================
-# Layout
-# =========================
 st.sidebar.title("Stock Radar")
 page = st.sidebar.radio("", ["대시보드", "자동 발굴", "조건"], label_visibility="collapsed")
 st.sidebar.divider()
@@ -557,123 +312,89 @@ st.markdown(
 if page == "대시보드":
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown("<div class='metric-card'><div class='muted'>시장</div><div style='font-size:1.4rem;font-weight:800;margin-top:4px'>2</div><div class='muted' style='margin-top:6px'>국내주식 · ETF</div></div>", unsafe_allow_html=True)
+        st.metric("시장", "2", "국내 · ETF")
     with c2:
-        st.markdown("<div class='metric-card'><div class='muted'>후보</div><div style='font-size:1.4rem;font-weight:800;margin-top:4px'>TOP 5</div><div class='muted' style='margin-top:6px'>우선순위 출력</div></div>", unsafe_allow_html=True)
+        st.metric("후보", "TOP 5", "우선순위")
     with c3:
-        st.markdown("<div class='metric-card'><div class='muted'>기간</div><div style='font-size:1.4rem;font-weight:800;margin-top:4px'>스윙 · 중기</div><div class='muted' style='margin-top:6px'>오전 1회</div></div>", unsafe_allow_html=True)
+        st.metric("기간", "스윙·중기")
     with c4:
-        st.markdown("<div class='metric-card'><div class='muted'>테마</div><div style='font-size:1.4rem;font-weight:800;margin-top:4px'>8</div><div class='muted' style='margin-top:6px'>핵심 테마</div></div>", unsafe_allow_html=True)
+        st.metric("테마", "8")
 
-    st.markdown("### 최근 결과")
     left, right = st.columns(2)
     with left:
-        st.markdown("#### 국내주식")
-        stock_df = st.session_state.results_stock
-        if stock_df.empty:
+        st.markdown("### 국내주식")
+        if st.session_state.stock_results.empty:
             st.caption("실행 전")
         else:
-            for i, row in stock_df.head(5).iterrows():
-                result_card({"rank": i + 1, "name": row["name"], "theme": row["theme"], "score": row["score"], "reasons": row["reasons"], "risk": row["risk"]})
+            for i, row in st.session_state.stock_results.head(5).iterrows():
+                result_card(i + 1, row["name"], row["theme"], row["score"], row["reasons"], row["risk"])
     with right:
-        st.markdown("#### ETF")
-        etf_df = st.session_state.results_etf
-        if etf_df.empty:
+        st.markdown("### ETF")
+        if st.session_state.etf_results.empty:
             st.caption("실행 전")
         else:
-            for i, row in etf_df.head(5).iterrows():
-                result_card({"rank": i + 1, "name": row["name"], "theme": row["theme"], "score": row["score"], "reasons": row["reasons"], "risk": row["risk"]})
+            for i, row in st.session_state.etf_results.head(5).iterrows():
+                result_card(i + 1, row["name"], row["theme"], row["score"], row["reasons"], row["risk"])
 
 elif page == "자동 발굴":
-    left, right = st.columns([1.05, 0.95])
-    with left:
-        st.markdown("### 실행")
-        market_mode = st.selectbox("시장 모드", MARKET_MODES)
-        term = st.selectbox("기간", TERMS)
-        themes = st.multiselect("테마", list(THEME_KEYWORDS.keys()), default=list(THEME_KEYWORDS.keys()))
-        run = st.button("종목 발굴 실행", use_container_width=True, type="primary")
-
-    with right:
-        st.markdown("### 현재 기준")
-        st.markdown(
-            """
-            - 필수 · 거래대금 / 20일선 / 뉴스 / 테마 / 시총
-            - 가점 · 거래대금 강도 / 고점 근접 / 뉴스 강도 / 상대강도
-            - 제외 · 최근 급등 / 저유동성 / 20일선 하회
-            """
-        )
+    col1, col2 = st.columns([1.05, 0.95])
+    with col1:
+        market_mode = st.selectbox("시장 모드", list(MODE_RULES.keys()))
+        term = st.selectbox("기간", ["스윙", "중기"])
+        selected_themes = st.multiselect("테마", list(THEMES.keys()), default=list(THEMES.keys()))
+        run = st.button("종목 발굴 실행", type="primary", use_container_width=True)
+    with col2:
         st.info(MODE_RULES[market_mode])
+        st.markdown("- 필수 · 거래대금 / 20일선 / 테마 / 시총")
+        st.markdown("- 가점 · 거래대금 강도 / 고점 근접 / 상대강도")
+        st.markdown("- 제외 · 최근 급등 / 저유동성 / 20일선 하회")
 
     if run:
-        with st.spinner("국내주식 자동 발굴 중"):
+        with st.spinner("국내주식 수집 중"):
             stock_df, stock_debug = build_stock_candidates()
-        with st.spinner("ETF 자동 발굴 중"):
+        with st.spinner("ETF 수집 중"):
             etf_df = build_etf_candidates()
 
         if not stock_df.empty:
-            stock_df = stock_df[stock_df["theme"].isin(themes)].copy()
-            stock_df = stock_df.sort_values(["score", "value"], ascending=[False, False]).head(5)
+            stock_df = stock_df[stock_df["theme"].isin(selected_themes)].head(5).copy()
         if not etf_df.empty:
-            etf_df = etf_df[etf_df["theme"].isin(themes)].copy()
-            etf_df = etf_df.sort_values(["score", "value"], ascending=[False, False]).head(5)
+            etf_df = etf_df[etf_df["theme"].isin(selected_themes)].head(5).copy()
 
-        st.session_state.results_stock = stock_df
-        st.session_state.results_etf = etf_df
+        st.session_state.stock_results = stock_df
+        st.session_state.etf_results = etf_df
         st.session_state.stock_debug = stock_debug
-        st.session_state.last_run_msg = datetime.now().strftime("%Y-%m-%d %H:%M 실행 완료")
 
-    if st.session_state.last_run_msg:
-        st.caption(st.session_state.last_run_msg)
     if "stock_debug" in st.session_state:
-        d = st.session_state.stock_debug
         with st.expander("진단"):
-            st.write(d)
-
-    if run:
-        st.markdown("### 진단")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.write(f"국내주식 후보 수: {0 if st.session_state.results_stock.empty else len(st.session_state.results_stock)}")
-        with c2:
-            st.write(f"ETF 후보 수: {0 if st.session_state.results_etf.empty else len(st.session_state.results_etf)}")
+            st.write(st.session_state.stock_debug)
 
     st.markdown("### 국내주식 TOP 5")
-    if st.session_state.results_stock.empty:
+    if st.session_state.stock_results.empty:
         st.caption("결과 없음")
     else:
-        for i, row in st.session_state.results_stock.iterrows():
-            result_card({"rank": i + 1, "name": row["name"], "theme": row["theme"], "score": row["score"], "reasons": row["reasons"], "risk": row["risk"]})
+        for i, row in st.session_state.stock_results.iterrows():
+            result_card(i + 1, row["name"], row["theme"], row["score"], row["reasons"], row["risk"])
 
     st.markdown("### ETF TOP 5")
-    if st.session_state.results_etf.empty:
+    if st.session_state.etf_results.empty:
         st.caption("결과 없음")
     else:
-        for i, row in st.session_state.results_etf.iterrows():
-            result_card({"rank": i + 1, "name": row["name"], "theme": row["theme"], "score": row["score"], "reasons": row["reasons"], "risk": row["risk"]})
+        for i, row in st.session_state.etf_results.iterrows():
+            result_card(i + 1, row["name"], row["theme"], row["score"], row["reasons"], row["risk"])
 
 elif page == "조건":
     st.markdown("### 필수 조건")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown(
-            """
-            - 국내주식 거래대금 300억 이상
-            - 국내주식 시총 2000억 이상
-            - 종가 > 20일선
-            - 최근 3일 뉴스 존재
-            - 핵심 테마 포함
-            """
-        )
+        st.markdown("- 국내주식 거래대금 1000억 원 이상")
+        st.markdown("- 국내주식 시총 1.5조 원 이상")
+        st.markdown("- 종가 > 20일선")
+        st.markdown("- 핵심 테마 포함")
     with c2:
-        st.markdown(
-            """
-            - ETF 거래대금 100억 이상
-            - 테마 매칭
-            - 수익률 플러스 우대
-            - 최근 급등 제외
-            - 저유동성 제외
-            """
-        )
+        st.markdown("- ETF 거래대금 300억 원 이상")
+        st.markdown("- 종가 > 20일선")
+        st.markdown("- 최근 급등 제외")
+        st.markdown("- 핵심 테마 포함")
 
     st.markdown("### 감시 테마")
-    st.markdown(" · ".join(THEME_KEYWORDS.keys()))
+    st.markdown(" · ".join(THEMES.keys()))
