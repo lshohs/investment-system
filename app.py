@@ -1,347 +1,162 @@
-import streamlit as st
-import pandas as pd
-from io import StringIO
+export default function MyDayPinkPlanner() {
+  const React = window.React;
+  const { useMemo, useState } = React;
 
-st.set_page_config(page_title="Morning Radar", page_icon="📈", layout="wide")
+  const [selectedDate] = useState("2026-03-11");
+  const [todayFocus, setTodayFocus] = useState("오늘은 나를 너무 몰아붙이지 않고, 해야 할 일과 쉬는 시간을 함께 챙기기");
+  const [mustDo, setMustDo] = useState([
+    "블로그 글감 1개 정리하기",
+    "가벼운 산책 30분",
+    "책 20쪽 읽기",
+  ]);
+  const [routineChecks, setRoutineChecks] = useState({
+    morning: true,
+    reading: false,
+    walk: false,
+    coffee: true,
+    writing: false,
+  });
 
-st.markdown(
-    """
-    <style>
-    .block-container {max-width: 1160px; padding-top: 1.6rem; padding-bottom: 2rem;}
-    .stButton>button {border-radius: 14px; height: 46px; font-weight: 700;}
-    .stTextArea textarea, .stTextInput input, .stSelectbox div[data-baseweb="select"] > div {
-        border-radius: 14px !important;
-    }
-    .hero {
-        background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
-        color: white;
-        border-radius: 24px;
-        padding: 26px 28px;
-        margin-bottom: 18px;
-    }
-    .card {
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        border-radius: 18px;
-        padding: 16px 18px;
-        margin-bottom: 14px;
-    }
-    .pill {
-        display:inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        border: 1px solid #e5e7eb;
-        background:#f8fafc;
-        font-size: 0.82rem;
-        margin-right: 6px;
-        margin-top: 6px;
-    }
-    .muted {color:#6b7280; font-size:0.92rem;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+  const weeklyRoutine = useMemo(
+    () => [
+      { day: "월", items: ["블로그 정리", "독서", "가계부"] },
+      { day: "화", items: ["산책", "논산 기록", "휴식"] },
+      { day: "수", items: ["커피 기록", "블로그 작성", "정리"] },
+      { day: "목", items: ["독서", "일정 점검", "산책"] },
+      { day: "금", items: ["글쓰기", "카페 메모", "휴식"] },
+      { day: "토", items: ["가벼운 외출", "사진 정리", "자유 시간"] },
+      { day: "일", items: ["주간 돌아보기", "다음 주 준비", "느긋한 시간"] },
+    ],
+    []
+  );
 
-THEME_BY_NAME = {
-    "반도체": ["삼성전자", "SK하이닉스", "한미반도체", "리노공업", "테크윙", "피에스케이", "이수페타시스", "DB하이텍"],
-    "AI": ["NAVER", "카카오", "폴라리스오피스", "솔트룩스", "이수페타시스", "한글과컴퓨터"],
-    "방산": ["한화에어로스페이스", "LIG넥스원", "현대로템", "한국항공우주", "한화시스템"],
-    "원전": ["두산에너빌리티", "한전기술", "비에이치아이", "우리기술", "보성파워텍"],
-    "조선": ["HD한국조선해양", "한화오션", "삼성중공업", "HD현대중공업", "HJ중공업"],
-    "2차전지": ["에코프로비엠", "에코프로", "포스코퓨처엠", "엘앤에프", "금양", "LG에너지솔루션"],
-    "로봇": ["레인보우로보틱스", "두산로보틱스", "로보스타", "유일로보틱스", "티로보틱스"],
-    "전력기기": ["HD현대일렉트릭", "LS ELECTRIC", "효성중공업", "제룡전기", "산일전기", "가온전선"],
-}
+  const toggle = (key) => {
+    setRoutineChecks((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
-ETF_THEME_RULES = {
-    "반도체": ["반도체", "필라델피아"],
-    "AI": ["AI", "인공지능", "빅테크", "테크"],
-    "방산": ["방산", "디펜스"],
-    "원전": ["원전", "원자력", "SMR"],
-    "조선": ["조선", "해운"],
-    "2차전지": ["2차전지", "배터리", "전기차"],
-    "로봇": ["로봇", "자동화"],
-    "전력기기": ["전력", "전선", "전력설비", "인프라"],
-}
-
-DEFAULT_STOCKS = """종목명,거래대금억,등락률,20일선위,5일상승률,뉴스수,대장주
-HD현대일렉트릭,1850,4.8,Y,11,4,Y
-한미반도체,1420,3.9,Y,9,3,Y
-두산에너빌리티,1180,2.7,Y,8,2,Y
-LIG넥스원,920,2.1,Y,7,2,Y
-레인보우로보틱스,760,5.4,Y,14,3,Y
-에코프로비엠,690,2.2,Y,6,1,N
-한화오션,640,3.1,Y,10,2,Y
-NAVER,610,1.9,Y,4,2,N"""
-
-DEFAULT_ETFS = """종목명,거래대금억,등락률,20일선위,5일상승률,뉴스수,대장주
-TIGER 미국필라델피아반도체,520,2.4,Y,6,1,Y
-KODEX AI전력핵심설비,310,1.9,Y,5,1,Y
-ACE 미국빅테크TOP7 Plus,280,1.4,Y,4,1,N
-KODEX K-방산,250,2.1,Y,5,1,Y
-TIGER 원전테마,180,1.8,Y,4,1,Y
-TIGER 2차전지TOP10,170,1.2,Y,3,1,N"""
-
-if "stock_results" not in st.session_state:
-    st.session_state.stock_results = pd.DataFrame()
-if "etf_results" not in st.session_state:
-    st.session_state.etf_results = pd.DataFrame()
-if "last_run" not in st.session_state:
-    st.session_state.last_run = ""
-
-
-def infer_stock_theme(name: str):
-    for theme, names in THEME_BY_NAME.items():
-        if any(n in str(name) for n in names):
-            return theme
-    return None
-
-
-def infer_etf_theme(name: str):
-    text = str(name)
-    for theme, keywords in ETF_THEME_RULES.items():
-        if any(k.lower() in text.lower() for k in keywords):
-            return theme
-    return None
-
-
-def normalize_yes_no(value):
-    text = str(value).strip().upper()
-    return text in ["Y", "YES", "TRUE", "1", "O"]
-
-
-def parse_input(text: str, asset_type: str) -> pd.DataFrame:
-    if not text.strip():
-        return pd.DataFrame()
-    try:
-        df = pd.read_csv(StringIO(text.strip()))
-    except Exception:
-        return pd.DataFrame()
-
-    expected = ["종목명", "거래대금억", "등락률", "20일선위", "5일상승률", "뉴스수", "대장주"]
-    if not all(col in df.columns for col in expected):
-        return pd.DataFrame()
-
-    df = df.copy()
-    df["종목명"] = df["종목명"].astype(str).str.strip()
-    for col in ["거래대금억", "등락률", "5일상승률", "뉴스수"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-    df["20일선위"] = df["20일선위"].apply(normalize_yes_no)
-    df["대장주"] = df["대장주"].apply(normalize_yes_no)
-    df["테마"] = df["종목명"].apply(infer_stock_theme if asset_type == "stock" else infer_etf_theme)
-    df = df[df["테마"].notna()].copy()
-    return df
-
-
-def score_stock_row(row: pd.Series) -> tuple[int, list[str], str]:
-    score = 0
-    reasons = []
-
-    if row["거래대금억"] >= 1000:
-        score += 25
-        reasons.append("거래대금 강함")
-    elif row["거래대금억"] >= 500:
-        score += 18
-        reasons.append("거래대금 양호")
-    elif row["거래대금억"] >= 200:
-        score += 10
-        reasons.append("거래대금 확보")
-
-    if row["20일선위"]:
-        score += 20
-        reasons.append("20일선 우위")
-
-    if row["등락률"] >= 3:
-        score += 15
-        reasons.append("상대강도")
-    elif row["등락률"] >= 1:
-        score += 8
-
-    if row["5일상승률"] >= 30:
-        return -1, [], "최근 급등 제외"
-    elif row["5일상승률"] >= 12:
-        score += 10
-        reasons.append("단기 탄력")
-    elif row["5일상승률"] >= 3:
-        score += 6
-
-    if row["뉴스수"] >= 3:
-        score += 10
-        reasons.append("뉴스 강도")
-    elif row["뉴스수"] >= 1:
-        score += 5
-
-    if row["대장주"]:
-        score += 15
-        reasons.append("테마 대장")
-
-    risk = "단기 과열 확인" if row["5일상승률"] >= 15 else "눌림 유지 확인"
-    return int(score), reasons[:4], risk
-
-
-def score_etf_row(row: pd.Series) -> tuple[int, list[str], str]:
-    score = 0
-    reasons = []
-
-    if row["거래대금억"] >= 300:
-        score += 25
-        reasons.append("거래대금 강함")
-    elif row["거래대금억"] >= 150:
-        score += 18
-        reasons.append("거래대금 양호")
-    elif row["거래대금억"] >= 70:
-        score += 10
-        reasons.append("거래대금 확보")
-
-    if row["20일선위"]:
-        score += 20
-        reasons.append("20일선 우위")
-
-    if row["등락률"] >= 1.5:
-        score += 12
-        reasons.append("상대강도")
-    elif row["등락률"] >= 0.5:
-        score += 6
-
-    if row["5일상승률"] >= 25:
-        return -1, [], "최근 급등 제외"
-    elif row["5일상승률"] >= 5:
-        score += 12
-        reasons.append("단기 흐름")
-    elif row["5일상승률"] > 0:
-        score += 6
-
-    if row["대장주"]:
-        score += 12
-        reasons.append("핵심 ETF")
-
-    risk = "섹터 변동성 확인" if row["5일상승률"] >= 10 else "추세 유지 확인"
-    return int(score), reasons[:4], risk
-
-
-def build_ranked(df: pd.DataFrame, asset_type: str) -> pd.DataFrame:
-    rows = []
-    if df.empty:
-        return pd.DataFrame()
-    for _, row in df.iterrows():
-        score, reasons, risk = score_stock_row(row) if asset_type == "stock" else score_etf_row(row)
-        if score < 0:
-            continue
-        rows.append({
-            "종목명": row["종목명"],
-            "테마": row["테마"],
-            "점수": score,
-            "이유": reasons if reasons else ["기본 통과"],
-            "주의": risk,
-            "거래대금억": row["거래대금억"],
-        })
-    if not rows:
-        return pd.DataFrame()
-    out = pd.DataFrame(rows).sort_values(["점수", "거래대금억"], ascending=[False, False]).reset_index(drop=True)
-    return out.head(5)
-
-
-def result_card(rank: int, name: str, theme: str, score: int, reasons: list[str], risk: str):
-    pills = "".join([f"<span class='pill'>{r}</span>" for r in reasons])
-    st.markdown(
-        f"""
-        <div class='card'>
-            <div style='display:flex;justify-content:space-between;align-items:flex-start;gap:12px;'>
-                <div>
-                    <div class='muted'>#{rank} · {theme}</div>
-                    <div style='font-size:1.16rem;font-weight:800;margin-top:2px'>{name}</div>
-                </div>
-                <div style='font-size:1.12rem;font-weight:800'>{score}</div>
-            </div>
-            <div style='margin-top:10px'>{pills}</div>
-            <div class='muted' style='margin-top:10px'>주의 · {risk}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-st.sidebar.title("Morning Radar")
-page = st.sidebar.radio("", ["대시보드", "발굴 실행", "가이드"], label_visibility="collapsed")
-
-st.markdown(
-    """
-    <div class='hero'>
-        <div style='font-size:0.92rem;opacity:0.82'>오전 발굴기 · 국내주식 / 국내상장 ETF</div>
-        <div style='font-size:2rem;font-weight:800;margin-top:6px'>Morning Radar</div>
-        <div style='margin-top:10px;opacity:0.9'>거래대금 상위 입력 → 자동 TOP 5</div>
+  const StatCard = ({ label, value, note }) => (
+    <div className="rounded-[28px] bg-white/85 backdrop-blur border border-white shadow-sm p-5">
+      <div className="text-sm text-slate-500">{label}</div>
+      <div className="mt-2 text-2xl font-bold text-slate-800">{value}</div>
+      {note ? <div className="mt-2 text-sm text-slate-500">{note}</div> : null}
     </div>
-    """,
-    unsafe_allow_html=True,
-)
+  );
 
-if page == "대시보드":
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("시장", "국내주식 · ETF")
-    with c2:
-        st.metric("후보", "TOP 5")
-    with c3:
-        st.metric("테마", "8")
+  const SectionCard = ({ title, subtitle, children }) => (
+    <section className="rounded-[32px] bg-white/90 backdrop-blur border border-white shadow-sm p-6 md:p-7">
+      <div className="mb-4">
+        <h2 className="text-xl md:text-2xl font-bold text-slate-800">{title}</h2>
+        {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
 
-    left, right = st.columns(2)
-    with left:
-        st.markdown("### 국내주식")
-        if st.session_state.stock_results.empty:
-            st.caption("실행 전")
-        else:
-            for i, row in st.session_state.stock_results.iterrows():
-                result_card(i + 1, row["종목명"], row["테마"], int(row["점수"]), row["이유"], row["주의"])
-    with right:
-        st.markdown("### ETF")
-        if st.session_state.etf_results.empty:
-            st.caption("실행 전")
-        else:
-            for i, row in st.session_state.etf_results.iterrows():
-                result_card(i + 1, row["종목명"], row["테마"], int(row["점수"]), row["이유"], row["주의"])
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-rose-100 via-pink-50 to-fuchsia-100 text-slate-800 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="rounded-[36px] bg-gradient-to-r from-pink-300 via-rose-300 to-fuchsia-300 p-7 md:p-9 shadow-sm mb-6 text-white">
+          <div className="text-sm md:text-base opacity-90">하루를 차분하게 정리하는 생활 플래너</div>
+          <div className="mt-2 text-3xl md:text-4xl font-bold tracking-tight">나의 하루</div>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-4xl">
+            <div className="rounded-2xl bg-white/20 px-4 py-3 backdrop-blur">오늘 날짜 · {selectedDate}</div>
+            <div className="rounded-2xl bg-white/20 px-4 py-3 backdrop-blur">기분 · 잔잔하고 밝게</div>
+            <div className="rounded-2xl bg-white/20 px-4 py-3 backdrop-blur">오늘의 목표 · 무리하지 않기</div>
+          </div>
+        </div>
 
-elif page == "발굴 실행":
-    left, right = st.columns(2)
-    with left:
-        st.markdown("### 국내주식 입력")
-        stock_text = st.text_area("", value=DEFAULT_STOCKS, height=260, label_visibility="collapsed")
-    with right:
-        st.markdown("### ETF 입력")
-        etf_text = st.text_area(" ", value=DEFAULT_ETFS, height=260, label_visibility="collapsed")
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <StatCard label="오늘 꼭 할 일" value="3개" note="너무 많지 않게, 꼭 필요한 것만" />
+          <StatCard label="루틴 체크" value="2 / 5" note="조금씩 채워가는 하루" />
+          <StatCard label="이번 주 흐름" value="차분함" note="조절하면서 가는 리듬" />
+        </div>
 
-    run = st.button("종목 발굴 실행", use_container_width=True, type="primary")
+        <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6">
+          <div className="space-y-6">
+            <SectionCard title="오늘의 하루" subtitle="하루의 중심을 먼저 정리합니다.">
+              <div className="rounded-[24px] bg-rose-50 border border-rose-100 p-5 mb-4">
+                <div className="text-sm text-rose-500 mb-2">오늘의 한 줄</div>
+                <textarea
+                  value={todayFocus}
+                  onChange={(e) => setTodayFocus(e.target.value)}
+                  className="w-full min-h-[100px] resize-none rounded-2xl border border-rose-100 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-rose-200 text-slate-700"
+                />
+              </div>
 
-    if run:
-        stock_df = parse_input(stock_text, "stock")
-        etf_df = parse_input(etf_text, "etf")
-        st.session_state.stock_results = build_ranked(stock_df, "stock")
-        st.session_state.etf_results = build_ranked(etf_df, "etf")
-        st.session_state.last_run = "실행 완료"
+              <div>
+                <div className="text-base font-semibold mb-3">오늘 꼭 할 일</div>
+                <div className="space-y-3">
+                  {mustDo.map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-3 rounded-2xl bg-white border border-rose-100 px-4 py-3">
+                      <input type="checkbox" className="h-4 w-4 accent-pink-400" />
+                      <span className="text-slate-700">{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </SectionCard>
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### 국내주식 TOP 5")
-        if st.session_state.stock_results.empty:
-            st.caption("결과 없음")
-        else:
-            for i, row in st.session_state.stock_results.iterrows():
-                result_card(i + 1, row["종목명"], row["테마"], int(row["점수"]), row["이유"], row["주의"])
-    with c2:
-        st.markdown("### ETF TOP 5")
-        if st.session_state.etf_results.empty:
-            st.caption("결과 없음")
-        else:
-            for i, row in st.session_state.etf_results.iterrows():
-                result_card(i + 1, row["종목명"], row["테마"], int(row["점수"]), row["이유"], row["주의"])
+            <SectionCard title="주간 루틴" subtitle="반복되는 일상을 내 리듬에 맞게 정리합니다.">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {weeklyRoutine.map((row) => (
+                  <div key={row.day} className="rounded-[24px] bg-pink-50 border border-pink-100 p-4">
+                    <div className="font-semibold text-pink-600 mb-3">{row.day}</div>
+                    <div className="space-y-2">
+                      {row.items.map((item) => (
+                        <div key={item} className="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 border border-pink-100">
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+          </div>
 
-elif page == "가이드":
-    st.markdown("### 입력 형식")
-    st.code("종목명,거래대금억,등락률,20일선위,5일상승률,뉴스수,대장주")
-    st.markdown("### 예")
-    st.code(DEFAULT_STOCKS)
-    st.markdown("### 기준")
-    st.markdown("- 거래대금 강도")
-    st.markdown("- 20일선 우위")
-    st.markdown("- 5일 상승률 과열 제외")
-    st.markdown("- 뉴스수 보조 가점")
-    st.markdown("- 대장주 가점")
+          <div className="space-y-6">
+            <SectionCard title="오늘의 루틴" subtitle="작은 실천을 가볍게 체크합니다.">
+              <div className="space-y-3">
+                {[
+                  ["morning", "아침 정리하기"],
+                  ["reading", "독서 시간 갖기"],
+                  ["walk", "산책하기"],
+                  ["coffee", "커피 한 잔의 여유"],
+                  ["writing", "짧게라도 기록하기"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => toggle(key)}
+                    className={`w-full flex items-center justify-between rounded-2xl px-4 py-4 border transition ${
+                      routineChecks[key]
+                        ? "bg-pink-100 border-pink-200"
+                        : "bg-white border-pink-100 hover:bg-pink-50"
+                    }`}
+                  >
+                    <span className="text-slate-700">{label}</span>
+                    <span className={`text-sm px-3 py-1 rounded-full ${routineChecks[key] ? "bg-white text-pink-500" : "bg-pink-50 text-slate-400"}`}>
+                      {routineChecks[key] ? "완료" : "대기"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </SectionCard>
+
+            <SectionCard title="돌아보기" subtitle="하루를 무겁지 않게 정리합니다.">
+              <div className="space-y-4">
+                <div>
+                  <div className="text-sm text-slate-500 mb-2">좋았던 점</div>
+                  <textarea className="w-full min-h-[90px] resize-none rounded-2xl border border-pink-100 bg-pink-50 px-4 py-3 outline-none focus:ring-2 focus:ring-pink-200" placeholder="오늘 괜찮았던 순간을 짧게 적어봅니다." />
+                </div>
+                <div>
+                  <div className="text-sm text-slate-500 mb-2">조금 아쉬운 점</div>
+                  <textarea className="w-full min-h-[90px] resize-none rounded-2xl border border-pink-100 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-pink-200" placeholder="내일은 조금 다르게 해보고 싶은 것을 적습니다." />
+                </div>
+              </div>
+            </SectionCard>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
