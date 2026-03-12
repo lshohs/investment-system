@@ -1,6 +1,1 @@
 streamlit
-pandas
-pykrx
-openpyxl
-xlrd
-numpy
